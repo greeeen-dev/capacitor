@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 from .enums import Intents
 from .gateway import Gateway
 from .http import HTTPClient
-from .models import Channel, Guild, Message, User, UserProfile, VoiceState, Webhook
+from .models import Channel, Guild, Message, User, UserProfile, VoiceState, Webhook, GuildMember
 
 log = logging.getLogger(__name__)
 
@@ -50,6 +50,7 @@ class Client:
         self._user: User | None = None
         self._guilds: dict[int, Guild] = {}
         self._channels: dict[int, Channel] = {}
+        self._users: dict[int, User] = {}
         self._voice_states: dict[int, dict[int, VoiceState]] = {}
         self._pending_voice: dict[int, VoiceClient] = {}
         self._closed: bool = False
@@ -65,6 +66,16 @@ class Client:
     def guilds(self) -> list[Guild]:
         """List of guilds the bot is in (populated from READY + GUILD_CREATE)."""
         return list(self._guilds.values())
+
+    @property
+    def channels(self) -> list[Channel]:
+        """List of channels the bot can see."""
+        return list(self._channels.values())
+
+    @property
+    def users(self) -> list[User]:
+        """List of users the bot can see."""
+        return list(self._users.values())
 
     # =========================================================================
     # Event registration
@@ -86,6 +97,7 @@ class Client:
             on_guild_join   -> GUILD_CREATE
             on_guild_remove -> GUILD_DELETE
             on_member_join  -> GUILD_MEMBER_ADD
+            on_member_update  -> GUILD_MEMBER_UPDATE
             on_member_remove -> GUILD_MEMBER_REMOVE
             ... and any other gateway event as on_{lowercase_name}
         """
@@ -136,6 +148,14 @@ class Client:
                 for guild_data in data.get("guilds", []):
                     guild = Guild.from_data(guild_data, self._http)
                     self._guilds[guild.id] = guild
+                    # Cache channels from guild
+                    for ch_data in data.get("channels", []):
+                        ch = Channel.from_data(ch_data, self._http)
+                        self._channels[ch.id] = ch
+                    # Cache users from guild
+                    for ch_data in data.get("members", []):
+                        member = GuildMember.from_data(ch_data, self._http)
+                        self._users[member.user.id] = member.user
                 await self._fire("on_ready")
 
             case "MESSAGE_CREATE":
@@ -157,6 +177,10 @@ class Client:
                     ch = Channel.from_data(ch_data, self._http)
                     ch._guild = guild
                     self._channels[ch.id] = ch
+                # Cache users from guild
+                for member_data in data.get("members", []):
+                    member = GuildMember.from_data(member_data, self._http)
+                    self._users[member.user.id] = member.user
                 await self._fire("on_guild_join", guild)
 
             case "GUILD_DELETE":
@@ -165,9 +189,42 @@ class Client:
                 await self._fire("on_guild_remove", guild or data)
 
             case "GUILD_MEMBER_ADD":
+                member = GuildMember.from_data(data, self._http)
+
+                # Update guild channels cache (if the guild is cached)
+                if data.get("guild_id"):
+                    guild = self._guilds.get(int(data["guild_id"]))
+                    if guild:
+                        guild._members.update({member.user.id: member})
+
+                # Update users cache
+                self._users.update({member.user.id: member.user})
+
                 await self._fire("on_member_join", data)
 
+            case "GUILD_MEMBER_UPDATE":
+                member = GuildMember.from_data(data, self._http)
+
+                # Update guild channels cache (if the guild is cached)
+                if data.get("guild_id"):
+                    guild = self._guilds.get(int(data["guild_id"]))
+                    if guild:
+                        guild._members.update({member.user.id: member})
+
+                # Update users cache
+                self._users.update({member.user.id: member.user})
+
+                await self._fire("on_member_update", data)
+
             case "GUILD_MEMBER_REMOVE":
+                member = GuildMember.from_data(data, self._http)
+
+                if data.get("guild_id"):
+                    # Update guild channels cache (if the guild is cached)
+                    guild = self._guilds.get(int(data["guild_id"]))
+                    if guild:
+                        guild._members.pop(member.user.id, None)
+
                 await self._fire("on_member_remove", data)
 
             case "CHANNEL_CREATE":
@@ -175,6 +232,13 @@ class Client:
                 if channel.guild_id is not None:
                     channel._guild = self._guilds.get(channel.guild_id)
                 self._channels[channel.id] = channel
+
+                # Update guild channels cache (if the guild is cached)
+                if data.get("guild_id"):
+                    guild = self._guilds.get(int(data["guild_id"]))
+                    if guild:
+                        guild._channels.update({channel.id: channel})
+
                 await self._fire("on_channel_create", channel)
 
             case "CHANNEL_UPDATE":
@@ -182,6 +246,13 @@ class Client:
                 if channel.guild_id is not None:
                     channel._guild = self._guilds.get(channel.guild_id)
                 self._channels[channel.id] = channel
+
+                # Update guild channels cache (if the guild is cached)
+                if data.get("guild_id"):
+                    guild = self._guilds.get(int(data["guild_id"]))
+                    if guild:
+                        guild._channels.update({channel.id: channel})
+
                 await self._fire("on_channel_update", channel)
 
             case "CHANNEL_DELETE":
@@ -189,6 +260,12 @@ class Client:
                 # Try to get the full channel from cache before removing it
                 channel_id = int(data["id"])
                 channel = self._channels.pop(channel_id, None)
+
+                # Update guild channels cache (if the guild is cached)
+                if data.get("guild_id"):
+                    guild = self._guilds.get(int(data["guild_id"]))
+                    if guild:
+                        guild._channels.pop(channel_id, None)
 
                 if channel:
                     # We have the full channel object from cache
@@ -408,6 +485,22 @@ class Client:
         assert self._http is not None
         data = await self._http.create_webhook(channel_id, name=name, avatar=avatar)
         return Webhook.from_data(data, self._http)
+
+    # =========================================================================
+    # Cache methods
+    # =========================================================================
+
+    def get_guild(self, guild_id: int):
+        """Get a channel from the cache."""
+        return self._guilds.get(guild_id)
+
+    def get_channel(self, channel_id: int):
+        """Get a channel from the cache."""
+        return self._channels.get(channel_id)
+
+    def get_user(self, user_id: int):
+        """Get a user from the cache."""
+        return self._users.get(user_id)
 
     # =========================================================================
     # Voice methods

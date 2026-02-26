@@ -27,6 +27,7 @@ class Message:
     timestamp: str
     edited_timestamp: str | None = None
     guild_id: int | None = None
+    webhook_id: int | None = None
     embeds: list[dict[str, Any]] = field(default_factory=list)
     attachments: list[Attachment] = field(default_factory=list)
     mentions: list[User] = field(default_factory=list)
@@ -59,6 +60,7 @@ class Message:
             timestamp=data["timestamp"],
             edited_timestamp=data.get("edited_timestamp"),
             guild_id=int(data["guild_id"]) if data.get("guild_id") else None,
+            webhook_id=int(data["webhook_id"]) if data.get("webhook_id") else None,
             embeds=data.get("embeds", []),
             attachments=attachments,
             mentions=mentions,
