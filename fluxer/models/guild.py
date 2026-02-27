@@ -248,5 +248,15 @@ class Guild:
 
         await self._http.unban_guild_member(self.id, user_id, reason=reason)
 
+    # -- Cache Methods --
+    def get_channel(self, channel_id: int) -> Channel:
+        return self._channels.get(channel_id)
+
+    def get_member(self, member_id: int) -> GuildMember:
+        return self._members.get(member_id)
+
+    def __str__(self) -> str:
+        return self.name or f"Guild({self.id})"
+
     def __str__(self) -> str:
         return self.name or f"Guild({self.id})"
