@@ -47,9 +47,7 @@ class Message:
 
         author = User.from_data(data["author"], http)
         mentions = [User.from_data(u, http) for u in data.get("mentions", [])]
-        attachments = [
-            Attachment.from_data(a) for a in data.get("attachments", [])
-        ]
+        attachments = [Attachment.from_data(a) for a in data.get("attachments", [])]
 
         # Create message first without reactions
         message = cls(
