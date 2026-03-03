@@ -52,7 +52,7 @@ class User:
     def from_data(cls, data: dict[str, Any], http: HTTPClient | None = None) -> User:
         return cls(
             id=int(data["id"]),
-            username=data["username"],
+            username=data.get("username"),
             discriminator=data.get("discriminator"),
             global_name=data.get("global_name"),
             avatar_hash=data.get("avatar"),
