@@ -169,6 +169,9 @@ class Client:
             case "MESSAGE_DELETE":
                 await self._fire("on_message_delete", data)
 
+            case "MESSAGE_DELETE_BULK":
+                await self._fire("on_message_delete_bulk", data)
+
             case "GUILD_CREATE":
                 guild = Guild.from_data(data, self._http)
                 self._guilds[guild.id] = guild
