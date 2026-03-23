@@ -860,6 +860,10 @@ class Bot(Client):
                 )
             self._commands[cmd_name] = handler
 
+        self._commands = dict(
+            sorted(self._commands.items(), key=lambda kv: len(kv[0]), reverse=True)
+        )  # sorts the dictionary in reverse key length order
+
         # Register cog's event listeners
         for event_name, listeners in cog._listeners.items():
             for listener in listeners:
