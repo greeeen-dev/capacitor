@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
+from fluxer.utils import process_embed_args
 
 from ..utils import snowflake_to_datetime
 
@@ -26,7 +27,7 @@ class Message:
     author: User
     timestamp: str
     edited_timestamp: str | None = None
-    guild_id: int | None = None
+
     embeds: list[dict[str, Any]] = field(default_factory=list)
     attachments: list[Attachment] = field(default_factory=list)
     mentions: list[User] = field(default_factory=list)
@@ -56,7 +57,6 @@ class Message:
             author=author,
             timestamp=data["timestamp"],
             edited_timestamp=data.get("edited_timestamp"),
-            guild_id=int(data["guild_id"]) if data.get("guild_id") else None,
             embeds=data.get("embeds", []),
             attachments=attachments,
             mentions=mentions,
@@ -91,35 +91,10 @@ class Message:
         """The guild this message was sent in (if cached)."""
         return self._guild
 
-    @staticmethod
-    def _process_embed_args(kwargs: dict[str, Any]) -> dict[str, Any]:
-        """Process embed/embeds arguments to ensure proper format.
-
-        Converts:
-        - embed=Embed(...) -> embeds=[{...}]
-        - embeds=[Embed(...)] -> embeds=[{...}]
-        - embeds=[{...}] -> embeds=[{...}] (no change)
-        """
-        from .embed import Embed
-
-        # Handle singular 'embed' parameter
-        if "embed" in kwargs:
-            embed = kwargs.pop("embed")
-            if embed is not None:
-                # Convert Embed object to dict
-                if isinstance(embed, Embed):
-                    kwargs["embeds"] = [embed.to_dict()]
-                else:
-                    # Assume it's already a dict
-                    kwargs["embeds"] = [embed]
-
-        # Handle plural 'embeds' parameter - convert any Embed objects to dicts
-        if "embeds" in kwargs and kwargs["embeds"] is not None:
-            kwargs["embeds"] = [
-                e.to_dict() if isinstance(e, Embed) else e for e in kwargs["embeds"]
-            ]
-
-        return kwargs
+    @property
+    def guild_id(self) -> int | None:
+        """Shortcut for self.guild.id, created for backwards compatiblity"""
+        return self._guild.id if self._guild else None
 
     async def send(
         self,
@@ -149,7 +124,7 @@ class Message:
 
         # Auto-convert single embed to embeds list
         combined_kwargs = {"embed": embed, "embeds": embeds, **kwargs}
-        combined_kwargs = self._process_embed_args(combined_kwargs)
+        combined_kwargs = process_embed_args(combined_kwargs)
 
         # Handle file/files parameter - convert File objects to dict format
         file_list: list[dict[str, Any]] | None = None
@@ -166,7 +141,7 @@ class Message:
         )
         msg = Message.from_data(data, self._http)
         msg._channel = self._channel
-        msg._guild = self._guild
+        msg._cache_guild(self._guild)
         return msg
 
     async def reply(
@@ -197,7 +172,7 @@ class Message:
 
         # Auto-convert single embed to embeds list
         combined_kwargs = {"embed": embed, "embeds": embeds, **kwargs}
-        combined_kwargs = self._process_embed_args(combined_kwargs)
+        combined_kwargs = process_embed_args(combined_kwargs)
 
         # Handle file/files parameter - convert File objects to dict format
         file_list: list[dict[str, Any]] | None = None
@@ -223,7 +198,7 @@ class Message:
         )
         msg = Message.from_data(data, self._http)
         msg._channel = self._channel
-        msg._guild = self._guild
+        msg._cache_guild(self._guild)
         return msg
 
     async def send_to_channel(
@@ -259,7 +234,7 @@ class Message:
 
         # Auto-convert single embed to embeds list
         combined_kwargs = {"embed": embed, "embeds": embeds, **kwargs}
-        combined_kwargs = self._process_embed_args(combined_kwargs)
+        combined_kwargs = process_embed_args(combined_kwargs)
 
         # Handle file/files parameter - convert File objects to dict format
         file_list: list[dict[str, Any]] | None = None
@@ -272,7 +247,7 @@ class Message:
             channel_id, content=content, files=file_list, **combined_kwargs
         )
         msg = Message.from_data(data, self._http)
-        msg._guild = self._guild
+        msg._cache_guild(self._guild)
         return msg
 
     async def edit(self, content: str | None = None, **kwargs: Any) -> Message:
@@ -284,7 +259,7 @@ class Message:
         )
         msg = Message.from_data(data, self._http)
         msg._channel = self._channel
-        msg._guild = self._guild
+        msg._cache_guild(self._guild)
         return msg
 
     async def delete(self) -> None:
@@ -357,6 +332,32 @@ class Message:
             raise RuntimeError("Message is not bound to an HTTP client")
         await self._http.delete_all_reactions_for_emoji(self.channel_id, self.id, emoji)
 
+    async def pin(self) -> None:
+        """Pin this message to the channel.
+
+        Raises:
+            Forbidden: You don't have permission to pin messages
+            NotFound: The message doesn't exist
+            HTTPException: Pinning the message failed
+        """
+        if self._http is None:
+            raise RuntimeError("Message is not bound to an HTTP client")
+        await self._http.pin_message(self.channel_id, self.id)
+        self.pinned = True
+
+    async def unpin(self) -> None:
+        """Unpin this message from the channel.
+
+        Raises:
+            Forbidden: You don't have permission to unpin messages
+            NotFound: The message doesn't exist
+            HTTPException: Unpinning the message failed
+        """
+        if self._http is None:
+            raise RuntimeError("Message is not bound to an HTTP client")
+        await self._http.unpin_message(self.channel_id, self.id)
+        self.pinned = False
+
     # Internal methods for handling reaction updates from gateway events
     def _add_reaction(
         self, data: dict[str, Any], emoji: PartialEmoji, user_id: int
@@ -416,6 +417,12 @@ class Message:
                 return reaction
 
         raise ValueError(f"Reaction {emoji} not found on message")
+
+    def _cache_guild(self, guild: Guild | None) -> None:
+        """Set cached guild on this message and referenced_message, since replies can be assumed to be in same guild"""
+        self._guild = guild
+        if self.referenced_message is not None:
+            self.referenced_message._guild = guild
 
     def _clear_emoji(self, emoji: PartialEmoji) -> Reaction | None:
         """Internal method to clear all reactions of a specific emoji.

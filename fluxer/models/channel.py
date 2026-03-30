@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
+from fluxer.utils import process_embed_args
 
 from ..enums import ChannelType
 from ..utils import snowflake_to_datetime
@@ -120,11 +121,9 @@ class Channel:
         if self._http is None:
             raise RuntimeError("Channel is not bound to an HTTP client")
 
-        embed_list: list[dict[str, Any]] | None = None
-        if embed:
-            embed_list = [embed.to_dict()]
-        elif embeds:
-            embed_list = [e.to_dict() for e in embeds]
+        # Auto-convert single embed to embeds list
+        combined_kwargs = {"embed": embed, "embeds": embeds}
+        combined_kwargs = process_embed_args(combined_kwargs)
 
         # Handle file/files parameter - convert File objects to dict format
         file_list: list[dict[str, Any]] | None = None
@@ -136,13 +135,13 @@ class Channel:
         data = await self._http.send_message(
             self.id,
             content=content,
-            embeds=embed_list,
             files=file_list,
             message_reference=message_reference,
+            **combined_kwargs,
         )
         msg = Message.from_data(data, self._http)
         msg._channel = self
-        msg._guild = self._guild
+        msg._cache_guild(self._guild)
         return msg
 
     async def fetch_message(self, message_id: int | str) -> Message:
@@ -162,7 +161,7 @@ class Channel:
         data = await self._http.get_message(self.id, message_id)
         msg = Message.from_data(data, self._http)
         msg._channel = self
-        msg._guild = self._guild
+        msg._cache_guild(self._guild)
         return msg
 
     async def fetch_messages(self, limit: int = 50) -> list[Message]:
@@ -183,6 +182,24 @@ class Channel:
         msgs = [Message.from_data(msg_data, self._http) for msg_data in data]
         for msg in msgs:
             msg._channel = self
+            msg._cache_guild(self._guild)
+        return msgs
+
+    async def fetch_pinned_messages(self) -> list[Message]:
+        """Fetch all pinned messages from this channel.
+
+        Returns:
+            A list of pinned Message objects.
+        """
+        from .message import Message
+
+        if self._http is None:
+            raise RuntimeError("Channel is not bound to an HTTP client")
+
+        data = await self._http.get_pinned_messages(self.id)
+        msgs = [Message.from_data(msg_data, self._http) for msg_data in data]
+        for msg in msgs:
+            msg._channel = self
             msg._guild = self._guild
         return msgs
 
@@ -197,6 +214,14 @@ class Channel:
             raise RuntimeError("Channel is not bound to an HTTP client")
 
         await self._http.delete_messages(self.id, message_ids)
+
+    async def trigger_typing(self) -> None:
+        """Trigger a typing indicator in this channel."""
+
+        if self._http is None:
+            raise RuntimeError("Channel is not bound to an HTTP client")
+
+        return await self._http.trigger_typing(self.id)
 
     async def connect(
         self,
