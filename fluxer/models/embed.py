@@ -80,6 +80,21 @@ class Embed:
         return d
 
     @classmethod
+    def from_data(cls, data: dict) -> Embed:
+        return cls(
+            title=data.get("title"),
+            description=data.get("description"),
+            url=data.get("url"),
+            color=data.get("color"),
+            timestamp=data.get("timestamp"),
+            footer=data.get("footer"),
+            image=data.get("image"),
+            thumbnail=data.get("thumbnail"),
+            author=data.get("author"),
+            fields=data.get("fields")
+        )
+
+    @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Embed:
         embed = cls(
             title=data.get("title"),

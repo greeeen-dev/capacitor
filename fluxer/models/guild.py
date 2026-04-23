@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 from fluxer.models.emoji import Emoji
 from fluxer.models.member import GuildMember
 from fluxer.models.role import Role
+from fluxer.models.channel import Channel
 
 from ..utils import snowflake_to_datetime
 
@@ -24,18 +25,37 @@ class Guild:
     owner_id: int | None = None
     member_count: int | None = None
     unavailable: bool = False
+    _channels: dict[int, Channel] | None = None
+    _members: dict[int, GuildMember] | None = None
 
     _http: HTTPClient | None = field(default=None, repr=False)
 
     @classmethod
     def from_data(cls, data: dict[str, Any], http: HTTPClient | None = None) -> Guild:
+        # Parse channels
+        channels: dict[int, Channel] = {}
+        for channel in data.get("channels", []):
+            channel_obj = Channel.from_data(channel, http)
+            channels[channel_obj.id] = channel_obj
+
+        # Parse members
+        members: dict[int, GuildMember] = {}
+        for member in data.get("members", []):
+            member_obj = GuildMember.from_data(member, http)
+            members[member_obj.user.id] = member_obj
+
+        # Get properties
+        properties: dict = data.get("properties", {})
+
         return cls(
             id=int(data["id"]),
-            name=data.get("name"),
-            icon=data.get("icon"),
-            owner_id=int(data["owner_id"]) if data.get("owner_id") else None,
+            name=properties.get("name"),
+            icon=properties.get("icon"),
+            owner_id=int(properties["owner_id"]) if properties.get("owner_id") else None,
             member_count=data.get("member_count"),
             unavailable=data.get("unavailable", False),
+            _channels=channels,
+            _members=members,
             _http=http,
         )
 
@@ -138,7 +158,13 @@ class Guild:
         from .member import GuildMember
 
         data = await self._http.get_guild_member(self.id, user_id)
-        return GuildMember.from_data(data, self._http, guild_id=self.id)
+        member = GuildMember.from_data(data, self._http, guild_id=self.id)
+
+        # Cache member
+        if member.user.id not in self._members:
+            self._members.update({member.user.id: member})
+
+        return member
 
     async def fetch_members(
         self, *, limit: int = 100, after: int | None = None
@@ -158,10 +184,17 @@ class Guild:
         from .member import GuildMember
 
         data = await self._http.get_guild_members(self.id, limit=limit, after=after)
-        return [
+        members = [
             GuildMember.from_data(member_data, self._http, guild_id=self.id)
             for member_data in data
         ]
+
+        for member in members:
+            # Cache member
+            if member.user.id not in self._members:
+                self._members.update({member.user.id: member})
+
+        return members
 
     # -- Moderation Methods --
     async def kick(self, user_id: int, *, reason: str | None = None) -> None:
@@ -217,6 +250,13 @@ class Guild:
             raise RuntimeError("Cannot unban user without HTTPClient")
 
         await self._http.unban_guild_member(self.id, user_id, reason=reason)
+
+    # -- Cache Methods --
+    def get_channel(self, channel_id: int) -> Channel:
+        return self._channels.get(channel_id)
+
+    def get_member(self, member_id: int) -> GuildMember:
+        return self._members.get(member_id)
 
     def __str__(self) -> str:
         return self.name or f"Guild({self.id})"

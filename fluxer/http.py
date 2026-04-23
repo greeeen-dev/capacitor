@@ -288,6 +288,10 @@ class HTTPClient:
                 await asyncio.sleep(1 + attempt)
                 continue
 
+            except:
+                self._rate_limiter.release(route.bucket, {})
+                raise
+
     # =========================================================================
     # Convenience methods for common endpoints
     # =========================================================================
