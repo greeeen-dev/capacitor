@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 from .enums import Intents
 from .gateway import Gateway
 from .http import HTTPClient
-from .models import Channel, Guild, Message, User, UserProfile, VoiceState, Webhook, GuildMember
+from .models import Channel, Guild, Message, User, UserProfile, VoiceState, Webhook, GuildMember, Emoji
 
 log = logging.getLogger(__name__)
 
@@ -233,6 +233,21 @@ class Client:
                         guild._members.pop(member.user.id, None)
 
                 await self._fire("on_member_remove", data)
+
+            case "GUILD_EMOJIS_UPDATE":
+                if data.get("guild_id"):
+                    # Update guild emojis cache (if the guild is cached)
+                    guild = self._guilds.get(int(data["guild_id"]))
+
+                    # Create mapping for easier access
+                    emoji_mapping: dict[str, dict] = {emoji["id"]: emoji for emoji in data["emojis"]}
+
+                    if guild:
+                        guild._emojis = {int(emoji_id): guild._emojis.get(
+                            int(emoji_id), Emoji.from_data(emoji_data)
+                        ) for emoji_id, emoji_data in emoji_mapping.items()}
+
+                await self._fire("on_guild_emojis_update", data)
 
             case "CHANNEL_CREATE":
                 channel = Channel.from_data(data, self._http)

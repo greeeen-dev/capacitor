@@ -27,6 +27,7 @@ class Guild:
     unavailable: bool = False
     _channels: dict[int, Channel] | None = None
     _members: dict[int, GuildMember] | None = None
+    _emojis: dict[int, Emoji] | None = None
 
     _http: HTTPClient | None = field(default=None, repr=False)
 
@@ -44,6 +45,12 @@ class Guild:
             member_obj = GuildMember.from_data(member, http)
             members[member_obj.user.id] = member_obj
 
+        # Parse emojis
+        emojis: dict[int, Emoji] = {}
+        for emoji in data.get("emojis", []):
+            emoji_obj = Emoji.from_data(emoji, http)
+            emojis[emoji_obj.id] = emoji_obj
+
         # Get properties
         properties: dict = data.get("properties", {})
 
@@ -56,6 +63,7 @@ class Guild:
             unavailable=data.get("unavailable", False),
             _channels=channels,
             _members=members,
+            _emojis=emojis,
             _http=http,
         )
 
@@ -69,6 +77,14 @@ class Guild:
             ext = "gif" if self.icon.startswith("a_") else "png"
             return f"https://fluxerusercontent.com/icons/{self.id}/{self.icon}.{ext}"
         return None
+
+    @property
+    def members(self) -> list[GuildMember]:
+        return list(self._members.values())
+
+    @property
+    def emojis(self) -> list[Emoji]:
+        return list(self._emojis.values())
 
     async def fetch_emojis(self) -> list[Emoji]:
         """Fetch all emojis in this guild.
